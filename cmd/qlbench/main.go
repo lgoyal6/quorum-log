@@ -51,6 +51,11 @@ func newClient(endpoints []string, seed int64) *client {
 	return &client{
 		http: &http.Client{
 			Timeout: 10 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        64,
+				MaxIdleConnsPerHost: 16,
+				IdleConnTimeout:     90 * time.Second,
+			},
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse // handle 307 manually (PUT bodies)
 			},
