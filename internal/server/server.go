@@ -41,9 +41,10 @@ type Config struct {
 type Server struct {
 	cfg Config
 
-	mu    sync.Mutex // guards eng and peers
-	eng   *engine.Engine
-	peers map[uint64]string
+	mu      sync.Mutex // guards eng, peers, senders
+	eng     *engine.Engine
+	peers   map[uint64]string
+	senders map[uint64]chan raftpb.Message
 
 	httpc *http.Client
 	http  *http.Server
@@ -68,11 +69,19 @@ func New(cfg Config) (*Server, error) {
 		cfg.SnapshotTrailing = 64
 	}
 	s := &Server{
-		cfg:   cfg,
-		peers: map[uint64]string{},
-		httpc: &http.Client{Timeout: 5 * time.Second},
-		stop:  make(chan struct{}),
-		done:  make(chan struct{}),
+		cfg:     cfg,
+		peers:   map[uint64]string{},
+		senders: map[uint64]chan raftpb.Message{},
+		httpc: &http.Client{
+			Timeout: 5 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        256,
+				MaxIdleConnsPerHost: 64,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		},
+		stop: make(chan struct{}),
+		done: make(chan struct{}),
 	}
 	for id, u := range cfg.Peers {
 		s.peers[id] = u
@@ -159,27 +168,47 @@ func (s *Server) processReadyLocked() {
 		if err != nil {
 			log.Fatalf("quorumlogd: ready processing failed: %v", err)
 		}
-		if len(msgs) > 0 {
-			batches := map[uint64][]raftpb.Message{}
-			for _, m := range msgs {
-				batches[m.To] = append(batches[m.To], m)
-			}
-			for to, batch := range batches {
-				url := s.peers[to]
-				go s.sendBatch(to, url, batch)
-			}
+		for _, m := range msgs {
+			s.enqueueLocked(m)
 		}
 	}
 }
 
-func (s *Server) sendBatch(to uint64, url string, msgs []raftpb.Message) {
-	for _, m := range msgs {
-		ok := s.sendMsg(url, m)
+// enqueueLocked hands a message to the peer's dedicated sender goroutine
+// (created on demand). One goroutine per peer keeps messages to that peer in
+// order; a full queue drops the message, which raft tolerates and retries.
+func (s *Server) enqueueLocked(m raftpb.Message) {
+	ch, ok := s.senders[m.To]
+	if !ok {
+		ch = make(chan raftpb.Message, 4096)
+		s.senders[m.To] = ch
+		go s.senderLoop(m.To, ch)
+	}
+	select {
+	case ch <- m:
+	default:
 		if m.Type == raftpb.MsgSnap {
+			s.eng.ReportSnapshot(m.To, false)
+		}
+	}
+}
+
+func (s *Server) senderLoop(to uint64, ch chan raftpb.Message) {
+	for {
+		select {
+		case <-s.stop:
+			return
+		case m := <-ch:
 			s.mu.Lock()
-			s.eng.ReportSnapshot(to, ok)
-			s.processReadyLocked()
+			url := s.peers[to]
 			s.mu.Unlock()
+			ok := s.sendMsg(url, m)
+			if m.Type == raftpb.MsgSnap {
+				s.mu.Lock()
+				s.eng.ReportSnapshot(to, ok)
+				s.processReadyLocked()
+				s.mu.Unlock()
+			}
 		}
 	}
 }
