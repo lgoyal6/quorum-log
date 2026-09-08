@@ -49,6 +49,10 @@ type Config struct {
 	Logger         raft.Logger
 	// OnConfChange, if set, is invoked after a config change is applied.
 	OnConfChange func(cc raftpb.ConfChange)
+	// Incarnation distinguishes restarts of the same node so that stale
+	// in-flight ReadIndex contexts from a previous incarnation can never be
+	// confused with new ones.
+	Incarnation uint64
 }
 
 // Engine is not goroutine-safe. Serialize all calls.
@@ -69,8 +73,8 @@ type Engine struct {
 	ccWaiters   map[uint64]func(error)
 
 	readSeq     uint64
-	readWaiters map[string]func(error)  // rctx -> callback (fires when safe to read locally)
-	pendingRead []raft.ReadState        // readstates waiting for apply to catch up
+	readWaiters map[string]func(error) // rctx -> callback (fires when safe to read locally)
+	pendingRead []raft.ReadState       // readstates waiting for apply to catch up
 }
 
 // New opens storage in cfg.Dir and starts (or restarts) the raft node.
@@ -228,7 +232,7 @@ func (e *Engine) ProposeConfChange(cc raftpb.ConfChange, cb func(error)) error {
 // barrier can be dropped (no leader); callers retry on timeout.
 func (e *Engine) ReadIndex(cb func(error)) {
 	e.readSeq++
-	rctx := fmt.Sprintf("%d/%d", e.id, e.readSeq)
+	rctx := fmt.Sprintf("%d/%d/%d", e.id, e.cfg.Incarnation, e.readSeq)
 	e.readWaiters[rctx] = cb
 	e.rn.ReadIndex([]byte(rctx))
 }
