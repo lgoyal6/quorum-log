@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"quorumlog/internal/engine"
 	"quorumlog/internal/server"
 )
 
@@ -36,6 +37,9 @@ func main() {
 	if *id == 0 || *dataDir == "" {
 		flag.Usage()
 		os.Exit(2)
+	}
+	if engine.PlantedApplyBeforeQuorum {
+		log.Printf("quorumlogd: PLANTED FAULT BUILD (quorumlog_planted_apply_before_quorum): entries are applied before quorum commit. This build is a negative control, never a release.")
 	}
 	peers, err := parsePeers(*peersStr)
 	if err != nil {
