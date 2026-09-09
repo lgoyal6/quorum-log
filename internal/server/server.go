@@ -8,8 +8,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -35,6 +37,9 @@ type Config struct {
 	SnapshotThreshold uint64
 	SnapshotTrailing  uint64
 	TickInterval      time.Duration
+	// ChaosListen, when non-empty, serves the fault-injection control API
+	// (see chaos.go) on this loopback host:port. Empty disables it.
+	ChaosListen string
 }
 
 // Server drives one node.
@@ -46,10 +51,12 @@ type Server struct {
 	peers   map[uint64]string
 	senders map[uint64]chan raftpb.Message
 
-	httpc *http.Client
-	http  *http.Server
-	stop  chan struct{}
-	done  chan struct{}
+	httpc     *http.Client
+	http      *http.Server
+	chaosHTTP *http.Server
+	chaos     *chaosState
+	stop      chan struct{}
+	done      chan struct{}
 }
 
 type propResult struct {
@@ -80,8 +87,9 @@ func New(cfg Config) (*Server, error) {
 				IdleConnTimeout:     90 * time.Second,
 			},
 		},
-		stop: make(chan struct{}),
-		done: make(chan struct{}),
+		chaos: newChaosState(),
+		stop:  make(chan struct{}),
+		done:  make(chan struct{}),
 	}
 	for id, u := range cfg.Peers {
 		s.peers[id] = u
@@ -122,6 +130,12 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/status", s.handleStatus)
 	s.http = &http.Server{Addr: s.cfg.ListenAddr, Handler: mux}
 
+	if s.cfg.ChaosListen != "" {
+		if err := s.startChaosListener(); err != nil {
+			return err
+		}
+	}
+
 	go s.tickLoop()
 	log.Printf("quorumlogd: node %d listening on %s", s.cfg.ID, s.cfg.ListenAddr)
 	err := s.http.ListenAndServe()
@@ -138,6 +152,9 @@ func (s *Server) Stop() {
 	<-s.done
 	if s.http != nil {
 		s.http.Close()
+	}
+	if s.chaosHTTP != nil {
+		s.chaosHTTP.Close()
 	}
 	s.mu.Lock()
 	s.eng.Close()
@@ -199,6 +216,11 @@ func (s *Server) senderLoop(to uint64, ch chan raftpb.Message) {
 		case <-s.stop:
 			return
 		case m := <-ch:
+			if !s.chaos.allowOutbound(to) {
+				// Fault injection: blackhole the message on the sending
+				// side. Raft tolerates loss and retries.
+				continue
+			}
 			s.mu.Lock()
 			url := s.peers[to]
 			s.mu.Unlock()
@@ -239,6 +261,13 @@ func (s *Server) handleRaft(w http.ResponseWriter, r *http.Request) {
 	var m raftpb.Message
 	if err := m.Unmarshal(body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if !s.chaos.allowInbound(m.From) {
+		// Fault injection: blackhole the message on the receiving side. The
+		// sender sees a delivered response, which is what a network
+		// blackhole looks like to it.
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	s.mu.Lock()
@@ -543,4 +572,24 @@ func (s *Server) SnapshotFileSize() (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.eng.Storage().SnapshotFileSize()
+}
+
+// startChaosListener binds the fault-injection control API. It is only
+// called when ChaosListen is set, and it refuses any non-loopback address.
+func (s *Server) startChaosListener() error {
+	if err := checkLoopbackAddr(s.cfg.ChaosListen); err != nil {
+		return err
+	}
+	ln, err := net.Listen("tcp", s.cfg.ChaosListen)
+	if err != nil {
+		return fmt.Errorf("chaos listen %s: %w", s.cfg.ChaosListen, err)
+	}
+	s.chaosHTTP = &http.Server{Handler: s.chaosMux()}
+	log.Printf("quorumlogd: node %d chaos control API on %s (fault injection; loopback only)", s.cfg.ID, s.cfg.ChaosListen)
+	go func() {
+		if err := s.chaosHTTP.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("quorumlogd: chaos listener stopped: %v", err)
+		}
+	}()
+	return nil
 }
