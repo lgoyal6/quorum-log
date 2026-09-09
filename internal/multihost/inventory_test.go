@@ -110,3 +110,38 @@ func TestLoadInventoryRejectsUnknownFields(t *testing.T) {
 		t.Fatal("an inventory with an unknown field must be rejected, not silently ignored")
 	}
 }
+
+func TestLoadInventoryResolvesDryRunDataDir(t *testing.T) {
+	dir := t.TempDir()
+	invPath := filepath.Join(dir, "dry.json")
+	body := `{
+      "mode": "local-dry-run",
+      "hosts": [
+        {"id": 1, "name": "local-1", "advertise": "127.0.0.1", "raft_port": 9101, "chaos_port": 9301, "data_dir": ".agent-work/dry-run/n1"},
+        {"id": 2, "name": "local-2", "advertise": "127.0.0.1", "raft_port": 9102, "chaos_port": 9302, "data_dir": ".agent-work/dry-run/n2"},
+        {"id": 3, "name": "local-3", "advertise": "127.0.0.1", "raft_port": 9103, "chaos_port": 9303, "data_dir": ".agent-work/dry-run/n3"}
+      ],
+      "client": {"ops": 10, "read_fraction": 0.5, "concurrency": 2, "seed": 1},
+      "faults": {"kill_leader_at_op": 3, "isolate_follower_at_op": 5, "isolate_leader_at_op": 7, "restore_at_op": 9, "restart_all_after": true}
+    }`
+	if err := os.WriteFile(invPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	inv, err := LoadInventory(invPath)
+	if err != nil {
+		t.Fatalf("LoadInventory: %v", err)
+	}
+	for _, h := range inv.Hosts {
+		if !filepath.IsAbs(h.DataDir) {
+			t.Fatalf("host %d data_dir %q was not resolved to an absolute path", h.ID, h.DataDir)
+		}
+	}
+}
+
+func TestValidateRejectsDataDirWithSpaces(t *testing.T) {
+	inv := threeHostInventory()
+	inv.Hosts[0].DataDir = "/var/tmp/quorum log/n1"
+	if err := inv.Validate(); err == nil {
+		t.Fatal("a data_dir with a space must be rejected; it is interpolated into shell commands")
+	}
+}

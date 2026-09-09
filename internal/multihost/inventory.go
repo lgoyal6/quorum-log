@@ -17,6 +17,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -83,6 +84,18 @@ func LoadInventory(path string) (*Inventory, error) {
 	if err := inv.Validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	// A dry-run inventory may use a repo-relative data directory so the file
+	// itself carries no machine-specific path; resolve it now so every later
+	// step works with absolute paths.
+	if inv.Mode == ModeLocalDryRun {
+		for i := range inv.Hosts {
+			abs, err := filepath.Abs(inv.Hosts[i].DataDir)
+			if err != nil {
+				return nil, fmt.Errorf("%s: hosts[%d]: %w", path, i, err)
+			}
+			inv.Hosts[i].DataDir = abs
+		}
+	}
 	return &inv, nil
 }
 
@@ -121,8 +134,11 @@ func (inv *Inventory) Validate() error {
 		if h.RaftPort == h.ChaosPort {
 			return fmt.Errorf("hosts[%d]: raft_port and chaos_port must differ", i)
 		}
-		if h.DataDir == "" || !path.IsAbs(h.DataDir) {
-			return fmt.Errorf("hosts[%d]: data_dir must be an absolute path, got %q", i, h.DataDir)
+		if h.DataDir == "" {
+			return fmt.Errorf("hosts[%d]: data_dir is required", i)
+		}
+		if strings.ContainsAny(h.DataDir, " \t'\"") {
+			return fmt.Errorf("hosts[%d]: data_dir %q must not contain whitespace or quotes; it is interpolated into host shell commands", i, h.DataDir)
 		}
 		addr := net.JoinHostPort(h.Advertise, fmt.Sprint(h.RaftPort))
 		if seenAddr[addr] {
@@ -138,6 +154,9 @@ func (inv *Inventory) Validate() error {
 			}
 			if ip != nil && ip.IsLoopback() {
 				return fmt.Errorf("hosts[%d]: advertise %s is loopback, which cannot be a separate host", i, h.Advertise)
+			}
+			if !path.IsAbs(h.DataDir) {
+				return fmt.Errorf("hosts[%d]: data_dir must be an absolute path on the host, got %q", i, h.DataDir)
 			}
 		case ModeLocalDryRun:
 			if ip == nil || !ip.IsLoopback() {

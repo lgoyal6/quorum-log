@@ -1,0 +1,51 @@
+{
+  "mode": "local-dry-run",
+  "hosts": [
+    {
+      "id": 1,
+      "name": "local-process-1",
+      "ssh": "",
+      "advertise": "127.0.0.1",
+      "raft_port": 9401,
+      "chaos_port": 9411,
+      "data_dir": ".agent-work/dry-run/n1",
+      "goos": "",
+      "goarch": ""
+    },
+    {
+      "id": 2,
+      "name": "local-process-2",
+      "ssh": "",
+      "advertise": "127.0.0.1",
+      "raft_port": 9402,
+      "chaos_port": 9412,
+      "data_dir": ".agent-work/dry-run/n2",
+      "goos": "",
+      "goarch": ""
+    },
+    {
+      "id": 3,
+      "name": "local-process-3",
+      "ssh": "",
+      "advertise": "127.0.0.1",
+      "raft_port": 9403,
+      "chaos_port": 9413,
+      "data_dir": ".agent-work/dry-run/n3",
+      "goos": "",
+      "goarch": ""
+    }
+  ],
+  "client": {
+    "ops": 1000,
+    "read_fraction": 0.5,
+    "concurrency": 8,
+    "seed": 20260909
+  },
+  "faults": {
+    "kill_leader_at_op": 300,
+    "isolate_follower_at_op": 500,
+    "isolate_leader_at_op": 700,
+    "restore_at_op": 850,
+    "restart_all_after": true
+  }
+}

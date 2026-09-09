@@ -1,0 +1,51 @@
+{
+  "mode": "multi-host",
+  "hosts": [
+    {
+      "id": 1,
+      "name": "host-a",
+      "ssh": "user@host-a",
+      "advertise": "10.0.0.11",
+      "raft_port": 9101,
+      "chaos_port": 9301,
+      "data_dir": "/var/tmp/quorum-log/n1",
+      "goos": "linux",
+      "goarch": "amd64"
+    },
+    {
+      "id": 2,
+      "name": "host-b",
+      "ssh": "user@host-b",
+      "advertise": "10.0.0.12",
+      "raft_port": 9101,
+      "chaos_port": 9301,
+      "data_dir": "/var/tmp/quorum-log/n2",
+      "goos": "linux",
+      "goarch": "amd64"
+    },
+    {
+      "id": 3,
+      "name": "host-c",
+      "ssh": "user@host-c",
+      "advertise": "10.0.0.13",
+      "raft_port": 9101,
+      "chaos_port": 9301,
+      "data_dir": "/var/tmp/quorum-log/n3",
+      "goos": "linux",
+      "goarch": "amd64"
+    }
+  ],
+  "client": {
+    "ops": 1000,
+    "read_fraction": 0.5,
+    "concurrency": 8,
+    "seed": 20260909
+  },
+  "faults": {
+    "kill_leader_at_op": 300,
+    "isolate_follower_at_op": 500,
+    "isolate_leader_at_op": 700,
+    "restore_at_op": 850,
+    "restart_all_after": true
+  }
+}
