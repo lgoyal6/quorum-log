@@ -30,6 +30,7 @@ func main() {
 		snapThresh = flag.Uint64("snapshot-threshold", 10000, "log entries applied between snapshots")
 		snapTrail  = flag.Uint64("snapshot-trailing", 64, "log entries retained behind a snapshot")
 		tickMs     = flag.Int("tick-ms", 100, "raft tick interval in milliseconds")
+		chaosAddr  = flag.String("chaos-listen", "", "optional loopback host:port for the fault-injection control API (test hook; empty disables it)")
 	)
 	flag.Parse()
 	if *id == 0 || *dataDir == "" {
@@ -50,6 +51,7 @@ func main() {
 		SnapshotThreshold: *snapThresh,
 		SnapshotTrailing:  *snapTrail,
 		TickInterval:      time.Duration(*tickMs) * time.Millisecond,
+		ChaosListen:       *chaosAddr,
 	})
 	if err != nil {
 		log.Fatalf("quorumlogd: %v", err)
