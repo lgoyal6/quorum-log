@@ -113,12 +113,23 @@ func TestPreflightDryRunIsNeverDistinct(t *testing.T) {
 	if err := inv.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	rep, err := Preflight(context.Background(), inv, &LocalExec{}, "test-inventory.json")
+	rep, err := Preflight(context.Background(), inv, &LocalExec{}, "test-inventory.json", dir)
 	if err != nil {
 		t.Fatalf("Preflight: %v", err)
 	}
 	if rep.DistinctHosts {
 		t.Fatal("a local dry run must never report distinct hosts")
+	}
+	if rep.IdentityNote == "" {
+		t.Fatal("the report must explain how identities are recorded")
+	}
+	for _, f := range rep.Hosts {
+		if !strings.HasPrefix(f.MachineID, "sha256:") {
+			t.Fatalf("host %d machine identity %q is not a fingerprint", f.ID, f.MachineID)
+		}
+		if strings.HasPrefix(f.DataDir, "/") {
+			t.Fatalf("host %d data dir %q should be repo-relative in the artifact", f.ID, f.DataDir)
+		}
 	}
 	if rep.Mode != ModeLabelDryRun {
 		t.Fatalf("mode = %q, want %q", rep.Mode, ModeLabelDryRun)
@@ -136,5 +147,33 @@ func TestPreflightDryRunIsNeverDistinct(t *testing.T) {
 		if f.DataDevice == "" {
 			t.Fatalf("host %d: data device not identified: %+v", f.ID, f)
 		}
+	}
+}
+
+func TestFingerprintHidesTheValueButKeepsDistinctness(t *testing.T) {
+	if fingerprint("") != "" {
+		t.Fatal("an empty identity must stay empty, not hash to a value")
+	}
+	a := fingerprint("9891C29A-D018-549F-B09A-0554D52D174D")
+	b := fingerprint("9891C29A-D018-549F-B09A-0554D52D174D")
+	c := fingerprint("другой")
+	if a != b {
+		t.Fatal("the same identity must produce the same fingerprint")
+	}
+	if a == c {
+		t.Fatal("different identities must produce different fingerprints")
+	}
+	if !strings.HasPrefix(a, "sha256:") || strings.Contains(a, "9891C29A") {
+		t.Fatalf("fingerprint %q must not carry the raw identifier", a)
+	}
+}
+
+func TestDisplayPathIsRepoRelativeInsideTheRepo(t *testing.T) {
+	root := t.TempDir()
+	if got := displayPath(root+"/.agent-work/dry-run/n1", root); got != ".agent-work/dry-run/n1" {
+		t.Fatalf("displayPath inside the repo = %q, want a relative path", got)
+	}
+	if got := displayPath("/var/tmp/quorum-log/n1", root); got != "/var/tmp/quorum-log/n1" {
+		t.Fatalf("displayPath outside the repo = %q, want it unchanged", got)
 	}
 }

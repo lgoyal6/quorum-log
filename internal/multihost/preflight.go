@@ -2,7 +2,10 @@ package multihost
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -50,6 +53,9 @@ type HostFacts struct {
 	Problems        []string `json:"problems,omitempty"`
 }
 
+// IdentityNote explains how identities are recorded.
+const IdentityNote = "machine identity and boot id are recorded as sha256 fingerprints: distinctness is still verifiable (two hosts match only if the underlying values match) without publishing a machine's hardware identifiers"
+
 // InventoryReport is written as multihost-inventory.json (or, for a dry run,
 // results/dry-run/inventory.json).
 type InventoryReport struct {
@@ -61,15 +67,16 @@ type InventoryReport struct {
 	DistinctHosts       bool        `json:"distinct_hosts"`
 	DistinctnessReasons []string    `json:"distinctness_reasons"`
 	Hosts               []HostFacts `json:"hosts"`
+	IdentityNote        string      `json:"identity_note"`
 	Boundary            string      `json:"boundary"`
 }
 
 // Preflight collects host facts and decides whether the three hosts are
 // really three distinct machines.
-func Preflight(ctx context.Context, inv *Inventory, ex Executor, inventoryPath string) (*InventoryReport, error) {
+func Preflight(ctx context.Context, inv *Inventory, ex Executor, inventoryPath, repoRoot string) (*InventoryReport, error) {
 	facts := make([]HostFacts, 0, len(inv.Hosts))
 	for _, h := range inv.Hosts {
-		f, err := collectHostFacts(ctx, h, ex)
+		f, err := collectHostFacts(ctx, h, ex, repoRoot)
 		if err != nil {
 			return nil, err
 		}
@@ -91,13 +98,14 @@ func Preflight(ctx context.Context, inv *Inventory, ex Executor, inventoryPath s
 		DistinctHosts:       distinct && inv.Mode == ModeMultiHost,
 		DistinctnessReasons: reasons,
 		Hosts:               facts,
+		IdentityNote:        IdentityNote,
 		Boundary:            boundary,
 	}, nil
 }
 
 // collectHostFacts runs one simple command per fact so a single unsupported
 // command degrades that one field instead of the whole preflight.
-func collectHostFacts(ctx context.Context, h Host, ex Executor) (HostFacts, error) {
+func collectHostFacts(ctx context.Context, h Host, ex Executor, repoRoot string) (HostFacts, error) {
 	f := HostFacts{
 		ID:             h.ID,
 		ConfiguredName: h.Name,
@@ -106,7 +114,7 @@ func collectHostFacts(ctx context.Context, h Host, ex Executor) (HostFacts, erro
 		Advertise:      h.Advertise,
 		RaftPort:       h.RaftPort,
 		ChaosPort:      h.ChaosPort,
-		DataDir:        h.DataDir,
+		DataDir:        displayPath(h.DataDir, repoRoot),
 		BuildTarget:    h.BuildOS() + "/" + h.BuildArch(),
 	}
 	ask := func(script string) string {
@@ -125,17 +133,17 @@ func collectHostFacts(ctx context.Context, h Host, ex Executor) (HostFacts, erro
 	switch f.OSKind {
 	case "Linux":
 		f.MachineIDSource = "/etc/machine-id or /var/lib/dbus/machine-id"
-		f.MachineID = ask("cat /etc/machine-id 2>/dev/null || cat /var/lib/dbus/machine-id 2>/dev/null || true")
+		f.MachineID = fingerprint(ask("cat /etc/machine-id 2>/dev/null || cat /var/lib/dbus/machine-id 2>/dev/null || true"))
 		f.BootIDSource = "/proc/sys/kernel/random/boot_id"
-		f.BootID = ask("cat /proc/sys/kernel/random/boot_id 2>/dev/null || true")
+		f.BootID = fingerprint(ask("cat /proc/sys/kernel/random/boot_id 2>/dev/null || true"))
 		f.PrimaryAddress = ask("hostname -I 2>/dev/null | awk '{print $1}' || true")
 	case "Darwin":
 		f.MachineIDSource = "ioreg IOPlatformUUID"
-		f.MachineID = ask("ioreg -rd1 -c IOPlatformExpertDevice | awk -F'\"' '/IOPlatformUUID/{print $4}'")
+		f.MachineID = fingerprint(ask("ioreg -rd1 -c IOPlatformExpertDevice | awk -F'\"' '/IOPlatformUUID/{print $4}'"))
 		// macOS has no boot_id; the kernel boot time is the closest
 		// per-boot identity available.
 		f.BootIDSource = "sysctl kern.boottime (macOS has no boot_id)"
-		f.BootID = ask("sysctl -n kern.boottime 2>/dev/null || true")
+		f.BootID = fingerprint(ask("sysctl -n kern.boottime 2>/dev/null || true"))
 		f.PrimaryAddress = ask("ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true")
 	default:
 		f.Problems = append(f.Problems, fmt.Sprintf("unsupported os kind %q: machine and boot identity not collected", f.OSKind))
@@ -145,6 +153,35 @@ func collectHostFacts(ctx context.Context, h Host, ex Executor) (HostFacts, erro
 	f.DataDevice = device
 	f.DataMountPoint = mount
 	return f, nil
+}
+
+// fingerprint reduces an identifier to a stable short hash. Two hosts share
+// a fingerprint only when they share the underlying identifier, so the
+// distinctness check is unchanged, and no machine identifier is published.
+func fingerprint(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(value))
+	return "sha256:" + hex.EncodeToString(sum[:8])
+}
+
+// displayPath keeps a path inside the repository repo-relative, so artifacts
+// carry no path from the machine that produced them.
+func displayPath(path, repoRoot string) string {
+	if repoRoot == "" {
+		return path
+	}
+	absRoot, err := filepath.Abs(repoRoot)
+	if err != nil {
+		return path
+	}
+	rel, err := filepath.Rel(absRoot, path)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return path
+	}
+	return rel
 }
 
 // parseDF extracts the device and mount point from a df -P data line.

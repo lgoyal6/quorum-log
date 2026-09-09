@@ -187,6 +187,7 @@ type Workload struct {
 	writes    atomic.Int64
 	reads     atomic.Int64
 	lost      atomic.Int64
+	finished  atomic.Bool
 }
 
 // NewWorkload prepares the workload.
@@ -197,6 +198,11 @@ func NewWorkload(inv *Inventory, rec *Recorder, acked *AckedWrites) *Workload {
 // Completed reports how many operations have finished so far. The fault
 // scheduler watches this counter.
 func (w *Workload) Completed() int { return int(w.completed.Load()) }
+
+// Finished reports whether the traffic phase has stopped. The fault
+// scheduler uses it so a threshold the traffic never reaches fails fast
+// instead of waiting for the run deadline.
+func (w *Workload) Finished() bool { return w.finished.Load() }
 
 // Endpoints lists the client endpoints (one per host).
 func (w *Workload) Endpoints() []string {
@@ -212,6 +218,7 @@ func (w *Workload) Endpoints() []string {
 // history always covers every fault; the actual counts are reported, never
 // assumed.
 func (w *Workload) Run(ctx context.Context, faultsDone <-chan struct{}) error {
+	defer w.finished.Store(true)
 	target := w.Inv.Client.Ops
 	hardCap := target * 4
 	endpoints := w.Endpoints()
