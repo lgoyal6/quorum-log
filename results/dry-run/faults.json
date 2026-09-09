@@ -1,0 +1,183 @@
+{
+  "mode": "single-host-dry-run",
+  "boundary": "Single-host dry run: all three quorum-log node processes, the fault injection, and the client ran on one machine over loopback. This validates the harness only. It is not multi-host evidence, no remote host was contacted, and nothing here measures a network between machines.",
+  "generated_at": "2026-09-09T22:32:14Z",
+  "scenario": "full",
+  "executor": "local",
+  "events": [
+    {
+      "name": "kill_leader",
+      "detail": "SIGKILL to node 1 on local-process-1",
+      "at_op": 301,
+      "at_nanos": 2977800750,
+      "wall_clock": "2026-09-09T22:32:00.314791Z",
+      "node_id": 1
+    },
+    {
+      "name": "new_leader_elected",
+      "detail": "node 2 took over from killed node 1",
+      "at_op": 305,
+      "at_nanos": 4799172000,
+      "wall_clock": "2026-09-09T22:32:02.136156Z",
+      "duration_ms": 1821.362,
+      "node_id": 2
+    },
+    {
+      "name": "restart_killed_node",
+      "detail": "node 1 restarted from its persisted state",
+      "at_op": 414,
+      "at_nanos": 5817819084,
+      "wall_clock": "2026-09-09T22:32:03.154799Z",
+      "node_id": 1
+    },
+    {
+      "name": "cluster_settled",
+      "detail": "all three nodes report the same leader again",
+      "at_op": 415,
+      "at_nanos": 5821206584,
+      "wall_clock": "2026-09-09T22:32:03.158186Z",
+      "duration_ms": 3.382
+    },
+    {
+      "name": "isolate_follower",
+      "detail": "node 1 blackholed from nodes [2 3] in both directions; chaos state: {\"node_id\":1,\"drop_inbound\":[2,3],\"drop_outbound\":[2,3]}",
+      "at_op": 505,
+      "at_nanos": 6612345750,
+      "wall_clock": "2026-09-09T22:32:03.949322Z",
+      "node_id": 1,
+      "peers": [
+        2,
+        3
+      ]
+    },
+    {
+      "name": "clear_follower_isolation",
+      "detail": "node 1 reconnected before the leader is isolated, so a quorum can still exist",
+      "at_op": 704,
+      "at_nanos": 7960804875,
+      "wall_clock": "2026-09-09T22:32:05.297776Z",
+      "node_id": 1
+    },
+    {
+      "name": "cluster_settled",
+      "detail": "all three nodes report the same leader again",
+      "at_op": 720,
+      "at_nanos": 8077562250,
+      "wall_clock": "2026-09-09T22:32:05.414533Z",
+      "duration_ms": 116.755
+    },
+    {
+      "name": "isolate_leader",
+      "detail": "leader node 2 blackholed from nodes [1 3] in both directions; chaos state: {\"node_id\":2,\"drop_inbound\":[1,3],\"drop_outbound\":[1,3]}",
+      "at_op": 721,
+      "at_nanos": 8103987209,
+      "wall_clock": "2026-09-09T22:32:05.440958Z",
+      "node_id": 2,
+      "peers": [
+        1,
+        3
+      ]
+    },
+    {
+      "name": "new_leader_elected",
+      "detail": "node 1 elected while node 2 was isolated",
+      "at_op": 721,
+      "at_nanos": 9597184834,
+      "wall_clock": "2026-09-09T22:32:06.93415Z",
+      "duration_ms": 1493.192,
+      "node_id": 1
+    },
+    {
+      "name": "restore_network",
+      "detail": "every chaos isolation cleared on all three nodes",
+      "at_op": 859,
+      "at_nanos": 12103582375,
+      "wall_clock": "2026-09-09T22:32:09.440537Z"
+    },
+    {
+      "name": "cluster_healed",
+      "detail": "all three nodes agree on leader node 1",
+      "at_op": 862,
+      "at_nanos": 12123842084,
+      "wall_clock": "2026-09-09T22:32:09.460797Z",
+      "duration_ms": 20.254,
+      "node_id": 1
+    },
+    {
+      "name": "restart_all_stop",
+      "detail": "SIGTERM to all three nodes",
+      "at_op": 1007,
+      "at_nanos": 14264097417,
+      "wall_clock": "2026-09-09T22:32:11.601044Z"
+    },
+    {
+      "name": "restart_all_ready",
+      "detail": "all three nodes restarted from disk and agree on leader node 1",
+      "at_op": 1007,
+      "at_nanos": 17381857959,
+      "wall_clock": "2026-09-09T22:32:14.718792Z",
+      "duration_ms": 3117.759,
+      "node_id": 1
+    },
+    {
+      "name": "verify_acknowledged_writes",
+      "detail": "522 acknowledged writes re-read with linearizable reads; 0 missing or changed",
+      "at_op": 1007,
+      "at_nanos": 17474291334,
+      "wall_clock": "2026-09-09T22:32:14.811225Z"
+    }
+  ],
+  "measurements": {
+    "leader_kill_write_outage": {
+      "event": "kill_leader",
+      "event_at_nanos": 2977800750,
+      "last_acknowledged_write_before_nanos": 2965072459,
+      "first_acknowledged_write_after_nanos": 4825962875,
+      "outage_ms": 1860.890416,
+      "method": "client-observed: last acknowledged write returning before the event to the first acknowledged write returning after it",
+      "complete": true
+    },
+    "leader_kill_election": {
+      "ms": 1821.362,
+      "method": "driver polled /status until a node other than the killed node 1 reported itself leader"
+    },
+    "follower_isolation_progress": {
+      "window_start_nanos": 6612345750,
+      "window_end_nanos": 7960804875,
+      "window_ms": 1348.459125,
+      "acknowledged_writes": 103,
+      "acknowledged_reads": 96,
+      "writes_per_second": 76.38347955115066,
+      "made_progress": true,
+      "method": "acknowledged client operations returning inside the fault window, measured by the driver"
+    },
+    "leader_isolation_write_outage": {
+      "event": "isolate_leader",
+      "event_at_nanos": 8103987209,
+      "last_acknowledged_write_before_nanos": 8069068917,
+      "first_acknowledged_write_after_nanos": 11142935125,
+      "outage_ms": 3073.866208,
+      "method": "client-observed: last acknowledged write returning before the event to the first acknowledged write returning after it",
+      "complete": true
+    },
+    "leader_isolation_election": {
+      "ms": 1493.192,
+      "method": "driver polled /status on the majority until one of them reported itself leader while node 2 was isolated"
+    },
+    "restart_ready_recovery": {
+      "ms": 3117.760542,
+      "method": "from the stop signal to all three nodes ready and agreeing on one leader"
+    },
+    "restart_first_read_recovery": {
+      "ms": 3118.472417,
+      "method": "from the stop signal to the first successful linearizable read after the restart"
+    }
+  },
+  "acknowledged_writes": 522,
+  "acknowledged_write_loss": null,
+  "verified_keys": 522,
+  "restart_verified": true,
+  "notes": [
+    "client traffic and fault injection both ran from this driver; every timestamp is on the driver's clock"
+  ]
+}
