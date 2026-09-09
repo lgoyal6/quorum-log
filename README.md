@@ -19,6 +19,8 @@ the fault simulator, and the linearizability checking harness.
 ```
 cmd/quorumlogd        one node: flags, signals, server lifecycle
 cmd/qlbench           load and failover measurement client
+cmd/qlmultihost       multi-host gate driver: preflight, deploy, traffic,
+                      faults, linearizability check, artifacts
 internal/server       production runtime: wall-clock ticker, HTTP raft
                       transport (one ordered sender goroutine per peer),
                       client API, leader redirects, persisted membership
@@ -34,6 +36,9 @@ internal/sim          deterministic single-goroutine network and process
                       partition, crash/restart) driven by one seeded PRNG
 internal/check        history recorder plus the sequential KV model for
                       the Porcupine linearizability checker
+internal/multihost    the multi-host gate flow: inventory, ssh/local
+                      executors, host identity checks, deployment, client
+                      traffic, fault injection, measurements
 ```
 
 The engine is deliberately passive: no goroutines, timers, or channels. The
@@ -139,8 +144,130 @@ fail: applying entries before quorum commit (minority-partition and
 old-leader scenarios fail their linearizability check), removing request
 deduplication (duplicate-request scenario observes `xx` instead of `x`), and
 disabling snapshot persistence (restart scenario fails with a missing
-snapshot). These faults are not in the shipped code; they were applied
-temporarily to prove the tests can fail.
+snapshot). These faults are not in the shipped code. The deduplication and
+snapshot faults were applied temporarily to prove the tests can fail; the
+apply-before-quorum fault now lives permanently behind the
+`quorumlog_planted_apply_before_quorum` build tag, so the multi-host gate can
+rebuild a broken node on demand and require its own checks to reject it (see
+"Multi-host gate" below).
+
+## Multi-host gate
+
+Everything above runs on one machine. The multi-host gate is the harness for
+running the same store on three separate machines, breaking it there, and
+checking the client's own history of what happened. It lives in
+`cmd/qlmultihost` (the driver), `internal/multihost` (the flow), and
+`scripts/run-multihost-gate.sh` (the gate).
+
+**Evidence state: the harness is implemented and validated by a single-host
+dry run; multi-host evidence is blocked until three distinct authorized
+hosts exist.** The gate refuses to produce a passing result from anything
+less, and every artifact says which kind of run produced it.
+
+```sh
+scripts/run-multihost-gate.sh inventories/local-dry-run.json    # single-host dry run, exits 3
+scripts/run-multihost-gate.sh inventories/example-three-hosts.json
+```
+
+Exit codes: `0` passed on three distinct hosts, `1` a step failed or a
+criterion was not met, `2` usage, `3` blocked because the flow completed as a
+single-host dry run.
+
+### What the gate does
+
+1. **Preflight.** Collects each host's hostname, kernel, machine identity
+   (`/etc/machine-id` or the dbus id on Linux, the `IOPlatformUUID` on
+   macOS), boot id (`/proc/sys/kernel/random/boot_id` on Linux,
+   `kern.boottime` on macOS, which has no boot id), primary address, and the
+   filesystem device behind its data directory. The three hosts count as
+   distinct only when machine identity, hostname, and boot id are all present
+   and all differ. Identities are recorded as sha256 fingerprints, so
+   distinctness is verifiable without publishing a machine's identifiers.
+2. **Deploy.** Cross-compiles `quorumlogd` for each host's `goos`/`goarch`
+   and transfers exactly two files per host: the binary and a generated start
+   script. No source is transferred and the hosts need no Go toolchain.
+3. **Traffic.** Runs the configured mixed read/write workload from the driver
+   (the client machine), following leader redirects, and records an
+   externally observed history: invoke and return timestamps on the driver's
+   clock, operation, key, value, response, and redirects.
+4. **Faults.** While the traffic runs: SIGKILL the leader and restart it from
+   disk, isolate one follower and measure that the majority keeps making
+   progress, isolate the leader from the majority and measure the write
+   outage and the new election, restore the network, and finally restart
+   every node from disk and re-read every acknowledged write.
+5. **Check.** Runs porcupine over the client-observed history against the
+   same model the simulator uses (`internal/check`), and treats any
+   acknowledged write that is later missing as a hard failure.
+6. **Negative control.** Before the positive flow, the gate builds a node
+   with the `quorumlog_planted_apply_before_quorum` build tag, whose leader
+   applies and acknowledges a proposed entry before quorum commit, and
+   requires the harness to reject that run. Then it rebuilds the shipped
+   binary and runs the positive flow.
+
+The follower isolation is always cleared before the leader is isolated: with
+one node still cut off, isolating the leader would leave no possible quorum,
+so the two faults are sequential by design.
+
+### Fault injection hook on the node
+
+`quorumlogd -chaos-listen 127.0.0.1:PORT` serves a small control API used
+only for testing and fault injection:
+
+```sh
+curl -s -X POST http://127.0.0.1:9301/chaos/isolate -d '{"peers":[2,3],"drop_inbound":true,"drop_outbound":true}'
+curl -s http://127.0.0.1:9301/chaos
+curl -s -X DELETE http://127.0.0.1:9301/chaos/isolate
+```
+
+Isolating a peer blackholes raft messages in the requested directions on both
+the sending side and the receiving side, so a partition can be expressed from
+either end. The API is unauthenticated by construction, so the node refuses
+any non-loopback `-chaos-listen` address; the driver reaches it by running
+curl on the host itself over ssh. Without the flag nothing is served and the
+drop checks are no-ops.
+
+### What a real multi-host run requires
+
+- **Three distinct hosts**, each with its own kernel, its own network
+  identity, and its own persistent disk. Three containers, VMs, or processes
+  on one machine are not three hosts, and preflight will say so.
+- **ssh access** from the machine running the gate to each host
+  (`BatchMode=yes`, so key-based and non-interactive), and `curl` on each
+  host.
+- **No Go toolchain on the hosts.** Binaries are cross-compiled on the driver
+  machine from the inventory's `goos`/`goarch`.
+- **A writable data directory** per host (`data_dir`), and two free ports per
+  host: the raft/client port on the advertise address and a loopback-only
+  chaos port.
+- An inventory file: see `inventories/example-three-hosts.json`.
+
+Transferred to each host: the cross-compiled `quorumlogd` binary and the
+generated start script. Written on each host: only files under its
+`data_dir`. Signalled on each host: only the pid the gate itself started, and
+only while it is still a `quorumlogd` process.
+
+### Single-host dry run, measured 2026-09-09
+
+These numbers come from `results/dry-run/`, produced by
+`scripts/run-multihost-gate.sh inventories/local-dry-run.json` on one Apple
+M3 Pro (macOS): three `quorumlogd` processes, the fault injection, and the
+client all on that one machine over loopback. **They validate the harness.
+They are not multi-host evidence and no remote host was contacted.**
+
+| measurement | single-host dry run |
+|---|---|
+| client operations (traffic phase) | 1,007 (510 writes, 1,000 reads recorded, 7 writes indeterminate) |
+| acknowledged writes | 503, all re-readable after restarting every process from disk |
+| write outage after SIGKILL of the leader | 3,530 ms |
+| progress while one follower was isolated | 91 writes and 102 reads acknowledged in 2,595 ms (35.1 writes/s) |
+| write outage while the leader was isolated | 3,029 ms, new leader observed after 1,706 ms |
+| restart recovery | 3,199 ms to a ready cluster, 3,200 ms to the first linearizable read |
+| porcupine over the client history | Ok, 1,510 operations, 3 ms |
+| negative control (planted apply-before-quorum build) | rejected: porcupine Illegal, and 8 of 155 acknowledged writes missing after the restart |
+
+Outages are client-observed: the gap between the last acknowledged write
+before the fault and the first acknowledged write after it, which includes
+the client's own retry timeouts.
 
 ## Persistence and snapshots
 
@@ -226,13 +353,17 @@ failover outage of 1,236 ms before writes resumed on the new leader.
 ## Limitations and evidence boundaries
 
 - All benchmark and failover numbers are single-machine loopback
-  measurements; no multi-host deployment has been measured.
+  measurements; no multi-host deployment has been measured. The multi-host
+  gate that would measure one is implemented and validated by a single-host
+  dry run, and it stays blocked until three distinct authorized hosts exist.
 - Consensus correctness under faults is verified in the deterministic
   simulator; the production runtime shares the same engine, storage, and
   state machine but its transport and timing paths are exercised by the live
   cluster and benchmarks, not by the simulator.
 - The linearizability checker validates recorded histories from the
-  simulator's scenarios; it is not wired against the live HTTP cluster.
+  simulator's scenarios. The multi-host gate also runs it over a history
+  recorded by a client against the live HTTP cluster, but so far only in a
+  single-host dry run.
 - Storage uses JSON encodings chosen for inspectability, and the WAL is
   fsync'd per append; the write path is not optimized (no group commit
   tuning, no binary encoding).
