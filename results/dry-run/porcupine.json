@@ -1,0 +1,17 @@
+{
+  "mode": "single-host-dry-run",
+  "boundary": "Single-host dry run: all three quorum-log node processes, the fault injection, and the client ran on one machine over loopback. This validates the harness only. It is not multi-host evidence, no remote host was contacted, and nothing here measures a network between machines.",
+  "generated_at": "2026-09-09T22:32:14Z",
+  "checker": "github.com/anishathalye/porcupine via internal/check",
+  "model": "internal/check.KVModel (sequential key-value store, partitioned by key)",
+  "linearizable": true,
+  "result": "Ok",
+  "ops": 1529,
+  "writes": 526,
+  "reads": 1003,
+  "indeterminate_ops": 4,
+  "check_duration_ms": 1.273,
+  "acknowledged_writes_verified": 522,
+  "acknowledged_write_loss": null,
+  "note": "history recorded by the driver (the client), not by any node; operations whose outcome the client never learned are checked as indeterminate"
+}

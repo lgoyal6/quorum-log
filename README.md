@@ -256,14 +256,14 @@ They are not multi-host evidence and no remote host was contacted.**
 
 | measurement | single-host dry run |
 |---|---|
-| client operations (traffic phase) | 1,007 (510 writes, 1,000 reads recorded, 7 writes indeterminate) |
-| acknowledged writes | 503, all re-readable after restarting every process from disk |
-| write outage after SIGKILL of the leader | 3,530 ms |
-| progress while one follower was isolated | 91 writes and 102 reads acknowledged in 2,595 ms (35.1 writes/s) |
-| write outage while the leader was isolated | 3,029 ms, new leader observed after 1,706 ms |
-| restart recovery | 3,199 ms to a ready cluster, 3,200 ms to the first linearizable read |
-| porcupine over the client history | Ok, 1,510 operations, 3 ms |
-| negative control (planted apply-before-quorum build) | rejected: porcupine Illegal, and 8 of 155 acknowledged writes missing after the restart |
+| client operations (traffic phase) | 1,007 (526 writes and 1,003 reads recorded, 4 writes indeterminate) |
+| acknowledged writes | 522, all re-readable after restarting every process from disk |
+| write outage after SIGKILL of the leader | 1,861 ms, new leader observed after 1,821 ms |
+| progress while one follower was isolated | 103 writes and 96 reads acknowledged in 1,348 ms (76.4 writes/s) |
+| write outage while the leader was isolated | 3,074 ms, new leader observed after 1,493 ms |
+| restart recovery | 3,118 ms to a ready cluster and to the first linearizable read |
+| porcupine over the client history | Ok, 1,529 operations, 1 ms |
+| negative control (planted apply-before-quorum build) | rejected: porcupine Illegal, and 6 of 153 acknowledged writes missing after the restart |
 
 Outages are client-observed: the gap between the last acknowledged write
 before the fault and the first acknowledged write after it, which includes

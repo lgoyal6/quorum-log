@@ -1,0 +1,70 @@
+{
+  "mode": "single-host-dry-run",
+  "boundary": "Single-host dry run: all three quorum-log node processes, the fault injection, and the client ran on one machine over loopback. This validates the harness only. It is not multi-host evidence, no remote host was contacted, and nothing here measures a network between machines.",
+  "generated_at": "2026-09-09T22:31:53Z",
+  "build_tags": "quorumlog_planted_apply_before_quorum",
+  "scenario": "leader-isolation",
+  "planted_fault": "engine applies a proposed entry on the leader before quorum commit, so the client is acknowledged before the entry is committed",
+  "expectation": "the harness must reject this history: either porcupine reports Illegal or an acknowledged write is missing afterwards",
+  "rejected": true,
+  "rejections_found": [
+    "porcupine rejected the externally observed history (result Illegal)",
+    "6 acknowledged writes were missing or changed when re-read after the restart"
+  ],
+  "porcupine_result": "Illegal",
+  "ops": 460,
+  "acknowledged_writes": 153,
+  "lost_acknowledged_writes": 6,
+  "lost_acknowledged_write_sample": [
+    {
+      "key": "mh-w1-000006",
+      "expected": "v-w1-000006",
+      "observed_val": "",
+      "observed_found": false,
+      "status": "ok",
+      "http_code": 200
+    },
+    {
+      "key": "mh-w5-000007",
+      "expected": "v-w5-000007",
+      "observed_val": "",
+      "observed_found": false,
+      "status": "ok",
+      "http_code": 200
+    },
+    {
+      "key": "mh-w5-000008",
+      "expected": "v-w5-000008",
+      "observed_val": "",
+      "observed_found": false,
+      "status": "ok",
+      "http_code": 200
+    },
+    {
+      "key": "mh-w6-000002",
+      "expected": "v-w6-000002",
+      "observed_val": "",
+      "observed_found": false,
+      "status": "ok",
+      "http_code": 200
+    },
+    {
+      "key": "mh-w3-000008",
+      "expected": "v-w3-000008",
+      "observed_val": "",
+      "observed_found": false,
+      "status": "ok",
+      "http_code": 200
+    },
+    {
+      "key": "mh-w6-000003",
+      "expected": "v-w6-000003",
+      "observed_val": "",
+      "observed_found": false,
+      "status": "ok",
+      "http_code": 200
+    }
+  ],
+  "failing_line": "NEGATIVE CONTROL REJECTED THE PLANTED FAULT: porcupine rejected the externally observed history (result Illegal); 6 acknowledged writes were missing or changed when re-read after the restart",
+  "restoration": "the planted fault exists only behind the build tag; the shipped build excludes it and is rebuilt and rerun immediately after this control"
+}
