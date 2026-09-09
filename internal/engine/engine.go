@@ -202,6 +202,9 @@ func (e *Engine) Propose(op sm.Op, cb func(sm.Result, error)) error {
 		delete(e.propWaiters, propKey(op.ClientID, op.ReqID))
 		return err
 	}
+	// Test-only hook: empty in every shipped build. See
+	// planted_disabled.go and planted_apply_before_quorum.go.
+	e.plantedApplyBeforeQuorum(op)
 	return nil
 }
 
