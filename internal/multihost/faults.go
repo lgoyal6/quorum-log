@@ -155,6 +155,9 @@ func (f *FaultRunner) waitOp(ctx context.Context, n int) error {
 		if f.Work.Completed() >= n {
 			return nil
 		}
+		if f.Work.Finished() {
+			return fmt.Errorf("traffic stopped after %d operations before reaching operation %d, so this fault could not be injected", f.Work.Completed(), n)
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
