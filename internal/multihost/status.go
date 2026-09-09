@@ -93,3 +93,6 @@ func HostIDs(hosts []Host) []uint64 {
 	}
 	return out
 }
+
+// httpStatusClient is the short-timeout client used for status polling.
+func httpStatusClient() *http.Client { return &http.Client{Timeout: 2 * time.Second} }
